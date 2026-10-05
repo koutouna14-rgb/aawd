@@ -1,0 +1,153 @@
+# AetherMCScanner - one addon for OreoScannerPro (replaces AetherMCOpsecDetector + AetherMCDeepProbe).
+# Flags are written to OreoScanner's flag list and staff alerts; the AetherMC Scanner System
+# Discord webhook reads that list, so detections are posted with no webhook setup here.
+#
+# What runs for each joining player, in this order:
+#   1) Local-URL probe  - catches OpSec / ExploitPreventer "Block Local URLs".
+#   1b) Keybind probe   - pack-free sign test: a vanilla client resolves keybind ids (key.forward) to a
+#                         key name; shields that block keybind resolution return the raw id. Skips the
+#                         pack step (no prompt) when it catches the player.
+#   2) Deep-probe       - server-pack translation test (catches other translation shields).
+#                         Skipped when step 1 already caught the player, so those players
+#                         never see the resource-pack prompt.
+#   3) Passive checks   - client brand vs. registered channels.
+#   Then ONE score is calculated and at most ONE flag/kick happens.
+enabled: true
+debug: false
+
+scan-on-join: true
+# Start this long after join.
+join-delay-seconds: 3
+# Names starting with these are skipped (Floodgate/Bedrock players use ".").
+skip-name-prefixes: ["."]
+
+# ---------------------------------------------------------------
+# Step 1 - Local-URL timing probe (detects "Block Local URLs")
+# ---------------------------------------------------------------
+# LOCAL packs go out first to private black-hole addresses in three ranges. Vanilla tries
+# the connection (slow). OpSec refuses before touching the network, so the client reports
+# FAILED_DOWNLOAD almost immediately. Only if they all failed instantly, a CONTROL pack goes
+# to a non-local black-hole address: a normal client must still be waiting on it. If it also
+# fails instantly, the player's network just rejects unroutable addresses and nobody is flagged.
+# Keep local-urls at 4 entries or fewer (OpSec's own TrackPack alert trips above that).
+local-url-probe:
+  enabled: true
+  control-url: "http://192.0.2.1/oreo-control.zip"
+  local-urls:
+    - "http://10.255.255.254/oreo-local.zip"
+    - "http://192.168.255.254/oreo-local2.zip"
+    - "http://172.31.255.254/oreo-local3.zip"
+  # How many local packs must fail instantly to count. 0 = all of them (recommended).
+  required-fast: 0
+  # OpSec does not block local URLs when the server itself is on a local address.
+  skip-if-local-server: true
+  control-wait-seconds: 4
+  control-fast-fail-ms: 1500
+  local-timeout-seconds: 10
+  local-fast-fail-ms: 1000
+  # Also counts clients that report a pack as loaded from an unreachable URL ("auto accept" spoofers).
+  detect-pack-spoofers: true
+
+# ---------------------------------------------------------------
+# Step 1b - Keybind control probe (no resource pack needed)
+# ---------------------------------------------------------------
+# An invisible sign carries two vanilla keybind components (key.forward, key.jump), a vanilla
+# translation key (gui.done) and a missing key with a fallback. Vanilla, Lunar, Badlion etc. resolve
+# keybinds normally. A client that answers with the raw id is blocking keybind resolution
+# (OpSec / ExploitPreventer style shields), even if it declines or fakes the resource pack.
+# Test it with real Lunar/Badlion accounts and check "keybind reply" lines with debug: true.
+keybind-probe:
+  enabled: true
+  reply-timeout-seconds: 5
+
+# ---------------------------------------------------------------
+# Step 2 - Deep-Probe (server-pack translation test)
+# ---------------------------------------------------------------
+# A tiny resource pack hosted by this plugin defines two made-up translation keys. Every scan gets its
+# own pack (unique URL, SHA-1, pack id and expected values), so it cannot be cached or replayed, and a
+# client that reports it loaded without ever downloading it is flagged. Once the
+# client reports it loaded, a sign probe asks it to resolve those keys, a vanilla key, and a
+# missing key with a fallback. A client that loaded the pack but cannot show its keys is
+# blocking/altering translations. NOTE: OpSec itself lets server-pack keys through, so this
+# step targets OTHER translation shields; OpSec is caught by step 1.
+deep-probe:
+  enabled: true
+  # Players' clients download the pack from  http://<public-host>:<port>/<path>
+  # public-host must be your public domain or IP and the port must be open (TCP).
+  public-host: "15.235.235.235"
+  port: 25512
+  bind-address: "0.0.0.0"
+  path: "aethermc-deepprobe.zip"
+  prompt: "AetherMC connection check"
+  load-timeout-seconds: 25
+  sign-reply-timeout-seconds: 5
+  # If OreoScanner is probing the same player when the sign step is due, wait up to this long.
+  wait-for-oreo-max-seconds: 60
+  skip-if-local-server: true
+
+# ---------------------------------------------------------------
+# Combined scoring
+# ---------------------------------------------------------------
+# Each signal adds points. A player is flagged when the total reaches flag-threshold.
+# Confidence: total >= 2x threshold = Very high, above threshold = High, otherwise Medium.
+scoring:
+  flag-threshold: 3
+  passive-checks: true
+  weights:
+    local-url-block-probe: 6        # local-URL packs failed instantly, control did not (OpSec)
+    pack-auto-accept: 6             # reported a pack loaded from an unreachable address
+    pack-key-blocked: 3             # loaded the probe pack but cannot show its keys
+    vanilla-key-blocked: 3          # cannot show a plain vanilla key
+    brand-vanilla-mod-channels: 2   # brand says vanilla but mod channels are registered
+    loader-channel-mismatch: 2      # brand names one loader, channels belong to another
+    fabric-no-channels: 1           # brand fabric, no channels (also a Fabric client without Fabric API)
+    fallback-mangled: 1             # ignored the translation fallback
+    sign-no-reply: 1                # loaded the pack but never answered the sign probe
+    keybind-blocked: 6              # keybind probe came back with raw ids (OpSec-style shield)
+    keybind-no-reply: 1             # never answered / empty keybind sign (lag-prone, keep low)
+    pack-not-loaded: 1              # declined / failed / discarded the probe pack (many legit players decline packs, keep low)
+    pack-status-spoofed: 6          # said the probe pack loaded but never downloaded its unique URL
+
+# ---------------------------------------------------------------
+# Remember flagged players (flagged.yml in this folder)
+# ---------------------------------------------------------------
+# On first start, remembered players from the old AetherMCOpsecDetector / AetherMCDeepProbe
+# folders are imported automatically.
+persist:
+  enabled: true
+  reflag-on-join: true
+  skip-probe-if-known: true
+  # true = remembered players are RE-SCANNED on every join instead of being re-flagged
+  # (reflag-on-join / skip-probe-if-known are ignored). If the scan still catches them they
+  # are flagged and kicked again; if it comes back fully clean they are removed from the list.
+  # "Fully clean" means the local-URL probe really ran and passed, and the pack test (if it
+  # ran) was loaded and answered. A declined pack, a skipped probe or a network that rejects
+  # unroutable addresses is inconclusive and keeps them remembered. Players can use this to
+  # get unflagged by turning OpSec off, so leave it false unless that is what you want.
+  clear-on-clean-scan: false
+
+# ---------------------------------------------------------------
+# What happens on a flag
+# ---------------------------------------------------------------
+actions:
+  # Shows up in /modcheck gui and OreoScanner's recent flags. This is also what makes the
+  # AetherMC webhook post it, so leave it on.
+  record-oreoscanner-flag: true
+  # Name shown when the local-URL probe (OpSec) or pack-spoofer check caught the player.
+  opsec-mod-name: "OpSec"
+  # Name shown when only the deep-probe / passive signals caught the player.
+  mod-name: "Opsec (Deep-Probe)"
+  # OreoScanner category: HACK_CLIENT, UTILITY, SUSPICIOUS or OTHER.
+  flag-category: SUSPICIOUS
+  alert-staff: true
+  # Remove the player when flagged.
+  kick: true
+  # true = OreoScannerPro does the kick, so the player sees Oreo's own disconnect screen
+  # (the "disconnect-screen" text in OreoScanner's config.yml, with %mod% = OpSec).
+  # If OreoScanner's mods.yml has an entry named like the flag (e.g. "OpSec") with kick or
+  # ban enabled, that entry is used, so Oreo's ban setting is honoured too.
+  kick-via-oreoscanner: true
+  # Only used when kick-via-oreoscanner is false (or if Oreo's kick fails).
+  kick-message: "Disallowed modification detected: Opsec"
+  # Console commands, %player% is replaced.
+  console-commands: []

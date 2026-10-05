@@ -1,0 +1,23 @@
+name: AetherMCScanner
+version: '2.1.0'
+main: dev.aethermc.scanner.ScannerPlugin
+api-version: '1.21'
+description: OpSec detector + Deep-Probe + combined scoring in one addon for OreoScannerPro. Flags go to OreoScanner so the AetherMC webhook posts them.
+depend: [OreoScannerPro, packetevents]
+folia-supported: true
+commands:
+  deepprobe:
+    description: Scan a player, show status, or manage remembered players
+    usage: /deepprobe <player|status <player>|list|forget <player|uuid>|reload>
+    aliases: [opsecscan, aethermcscan]
+    permission: deepprobe.use
+permissions:
+  deepprobe.use:
+    description: Use /deepprobe
+    default: op
+  deepprobe.bypass:
+    description: Players with this permission are never scanned
+    default: false
+  opsecaddon.bypass:
+    description: Same as deepprobe.bypass (kept from AetherMCOpsecDetector)
+    default: false
