@@ -71,7 +71,15 @@ implements Listener {
         String string = playerResourcePackStatusEvent.getStatus().name();
         if (settings.debug) {
             String string2;
-            String string3 = probeSession == null ? "no-session" : (uUID == null ? "no-id" : (uUID.equals(probeSession.controlId) ? "control" : (string2 = probeSession.isLocal(uUID) ? "local" : "other")));
+            if (probeSession == null) {
+                string2 = "no-session";
+            } else if (uUID == null) {
+                string2 = "no-id";
+            } else if (uUID.equals(probeSession.controlId)) {
+                string2 = "control";
+            } else {
+                string2 = probeSession.isLocal(uUID) ? "local" : "other";
+            }
             long l = probeSession == null ? -1L : (string2.equals("control") ? OpsecProbe.ms(probeSession.controlSent) : OpsecProbe.ms(probeSession.localSent));
             this.plugin.getLogger().info("[debug] " + player.getName() + " pack " + string2 + " " + string + (String)(l >= 0L ? " +" + l + "ms" : "") + " ping=" + player.getPing() + "ms");
         }
